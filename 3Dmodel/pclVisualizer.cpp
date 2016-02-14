@@ -4,12 +4,13 @@
 #endif
 
 #include <iostream>
-#include <filesystem>
 #include <string>
 #include <boost/random.hpp>
 #include <time.h>
 
+//precompiled headers
 #include "stdafx.h"
+
 #include "pclVisualizer.h"
 
 using namespace boost;
@@ -19,11 +20,15 @@ using namespace::std;
 //global variables
 
 PointCloud<PointXYZ>::Ptr g_Cloud_output(new PointCloud<PointXYZ>);
+PointCloud<PointXYZ>::Ptr g_Cloud_previous(new PointCloud<PointXYZ>);
+string g_lastShape;
 PointCloud<PointXYZRGB>::Ptr g_CloudRGB(new PointCloud<PointXYZRGB>);
-
+int viewPort1 =0;
+int viewPort2 =0;
 
 double random01(void) {
-	boost::random::mt19937 rng;
+	static boost::random::mt19937 rng;
+	rng.seed(time(nullptr));
 	static boost::uniform_01<boost::mt19937> rn(rng);
 	return rn();
 }
@@ -124,29 +129,114 @@ void filterZeroPosition(pcl::PointCloud<PointXYZRGB>::Ptr input,
 	
 	pcl::PassThrough<pcl::PointXYZRGB> pass;
 	pass.setInputCloud(g_CloudRGB);
-	pass.setFilterFieldName("z");
-	pass.setFilterLimits(0.0, 0.001);
+	pass.setFilterFieldName("x");
+	pass.setFilterLimits(0.0, 0.0);
 	pass.setFilterLimitsNegative(true);
 	pass.filter(*tmp_cloud);
 	copyPointCloud(*tmp_cloud, *output);
 
 }
 
+int findPlane(pcl::PointCloud<PointXYZ>::Ptr input,
+	pcl::PointCloud<PointXYZ>::Ptr output,
+	boost::shared_ptr<PlanarPolygon<PointXYZ>> poly,
+	double distanceThreshold
+	) {
+	//Enables using the same pointcloud as input and output
+	PointCloud<PointXYZ>::Ptr tmp_cloud(new PointCloud<PointXYZ>);
+
+	ModelCoefficients::Ptr coefficients(new ModelCoefficients);
+	PointIndices::Ptr inliers(new PointIndices);
+	// Create the segmentation object
+	SACSegmentation<PointXYZ> seg;
+	// Create the filtering object
+	ExtractIndices<PointXYZ> extract;
+	// Project the model inliers
+	ProjectInliers<PointXYZ> proj;
+	// Create a Concave Hull representation of the projected inliers
+	PointCloud<PointXYZ>::Ptr cloud_hull(new PointCloud<PointXYZ>);
+	ConcaveHull<PointXYZ> chull;
+
+	// Optional
+	seg.setOptimizeCoefficients(true);
+	// Mandatory
+	seg.setModelType(SACMODEL_PLANE);
+	seg.setMethodType(SAC_RANSAC);
+
+	seg.setDistanceThreshold(distanceThreshold); //0.01
+	seg.setInputCloud(input);
+	seg.segment(*inliers, *coefficients);
+
+	if (inliers->indices.size() == 0)
+	{
+		PCL_ERROR("Could not estimate a planar model for the given dataset.");
+		return (-1);
+	}
+
+
+	proj.setModelType(SACMODEL_PLANE);
+	proj.setIndices(inliers);
+	proj.setInputCloud(input);
+	proj.setModelCoefficients(coefficients);
+	proj.filter(*tmp_cloud);
+	std::cerr << "PointCloud after projection has: "
+		<< tmp_cloud->points.size() << " data points." << std::endl;
+
+	chull.setInputCloud(tmp_cloud);
+	chull.setAlpha(1.0); //4 for wall
+	chull.reconstruct(*cloud_hull);
+
+	std::cerr << "Concave hull has: " << cloud_hull->points.size()
+		<< " data points." << std::endl;
+
+	
+	extract.setInputCloud(input);
+	extract.setIndices(inliers);
+	extract.setNegative(true);
+	extract.filter(*tmp_cloud);
+	copyPointCloud(*tmp_cloud, *output);
+
+
+	poly->setCoefficients(*coefficients);
+	poly->setContour(*cloud_hull);
+
+	return 0;
+}
+
+
 void keyboardEventOccurred(const pcl::visualization::KeyboardEvent &event,
 	void* viewer_void)
 {
 	boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer = *static_cast<boost::shared_ptr<pcl::visualization::PCLVisualizer> *> (viewer_void);
+	static int planeNumber = 0;
 	if (event.getKeySym() == "Home" && event.keyDown())
 	{
 		std::cout << "home was pressed => reloading original cloud to output" << std::endl;
 		reloadOutputPointcloud();
+		viewer->removeAllShapes(viewPort2);
+		g_lastShape.clear();
+		g_Cloud_previous->clear();
 		viewer->updatePointCloud(g_Cloud_output, "cloud_output");
 	}
-	
+	if (event.getKeySym() == "BackSpace" && event.keyDown())
+	{
+		std::cout << "Backspace was pressed => reloading original cloud to output" << std::endl;
+		if (!g_lastShape.empty()) {
+			viewer->removeShape(g_lastShape, viewPort2);
+			g_lastShape.clear();
+		}
+		if (!g_Cloud_previous->empty() ) {
+			copyPointCloud(*g_Cloud_previous, *g_Cloud_output);
+			viewer->updatePointCloud(g_Cloud_output, "cloud_output");
+			g_Cloud_previous->clear();
+		}
+	}
+	//filter
 	if (event.isCtrlPressed() && event.getKeySym() == "F1" && event.keyDown()) {
+		copyPointCloud(*g_Cloud_output, *g_Cloud_previous);
+
 		std::cout << "CTRL + F1 was pressed => filtering output cloud" << std::endl;
 		int meanK;
-
 		double StddevMulThresh;
 		cout << "Enter meanK(integer):";
 		cin >> meanK;
@@ -159,12 +249,51 @@ void keyboardEventOccurred(const pcl::visualization::KeyboardEvent &event,
 		cout << "Done." << endl;
 		viewer->updatePointCloud(g_Cloud_output, "cloud_output");
 	} else if (event.getKeySym() == "F1" && event.keyDown()) {
+		copyPointCloud(*g_Cloud_output, *g_Cloud_previous);
+
 		std::cout << "F1 was pressed => filtering output cloud" << std::endl;
 		cout << "Working...";
-		filter(g_Cloud_output, g_Cloud_output, 10, 1.0);
+		filter(g_Cloud_output, g_Cloud_output, 10, 5.0);
 		cout << "Done." << endl;
 		viewer->updatePointCloud(g_Cloud_output, "cloud_output");
 	}
+	//planes
+	if (event.isCtrlPressed() && event.getKeySym() == "F2" && event.keyDown()) {
+		boost::shared_ptr<PlanarPolygon<PointXYZ>> poly(new PlanarPolygon<PointXYZ>());
+		copyPointCloud(*g_Cloud_output, *g_Cloud_previous);
+		double distThresh;
+
+		std::cout << "F2 was pressed => filtering output cloud" << std::endl;
+		cout << "Enter distance threshold(double)(0.03):";
+		cin >> distThresh;
+		cout << endl;
+		cout << "Working..." << endl;
+		findPlane(g_Cloud_output, g_Cloud_output, poly, distThresh);
+		cout << "Done." << endl;
+		viewer->updatePointCloud(g_Cloud_output, "cloud_output");
+		auto r = random01();
+		auto g = random01();
+		auto b = random01();
+		viewer->addPolygon(*poly, r, g, b, "stena" + planeNumber, viewPort2);
+		g_lastShape = "stena" + planeNumber;
+		planeNumber++;
+	} else if (event.getKeySym() == "F2" && event.keyDown()) {
+		boost::shared_ptr<PlanarPolygon<PointXYZ>> poly(new PlanarPolygon<PointXYZ>());
+		copyPointCloud(*g_Cloud_output, *g_Cloud_previous);
+		
+		std::cout << "F2 was pressed => filtering output cloud" << std::endl;
+		cout << "Working..." << endl;
+		findPlane(g_Cloud_output, g_Cloud_output, poly, 0.03);
+		cout << "Done." << endl;
+		viewer->updatePointCloud(g_Cloud_output, "cloud_output");
+		auto r = random01();
+		auto g = random01();
+		auto b = random01();
+		viewer->addPolygon(*poly, r, g, b, "stena" + planeNumber, viewPort2);
+		g_lastShape = "stena" + planeNumber;
+		planeNumber++;
+	}
+	
 	if (event.getKeySym() == "Prior" && event.keyDown()) {
 		std::cout << "PgUp was pressed => toggling original cloud" << std::endl;
 		toggleOriginal(viewer_void);
@@ -182,48 +311,14 @@ int main(int argc, char* argv[])
 
 	
 	loadPCDFileFromArgument(argc, argv, *g_CloudRGB);
-	
+	//passthrough - removes points in x=0 (points in [0,0,0]) 
 	filterZeroPosition(g_CloudRGB, g_CloudRGB);
 
 
 	//copy pointCloud without rgb
-	copyPointCloud(*g_CloudRGB, *cloud_xyz);
+	copyPointCloud(*g_CloudRGB, *g_Cloud_output);
 
-	//planes
 
-#if 0
-			// Create the filtering object
-	StatisticalOutlierRemoval<PointXYZ> sor;
-	sor.setInputCloud(cloud_xyz);
-	sor.setMeanK(50);
-	sor.setStddevMulThresh(1.0);
-	sor.filter(*cloud_filtered);
-#else
-	copyPointCloud(*cloud_xyz, *cloud_filtered);
-#endif // 0
-
-	ModelCoefficients::Ptr coefficients(new ModelCoefficients);
-	PointIndices::Ptr inliers(new PointIndices);
-	// Create the segmentation object
-	SACSegmentation<PointXYZ> seg;
-	// Create the filtering object
-	ExtractIndices<PointXYZ> extract;
-	// Project the model inliers
-	ProjectInliers<PointXYZ> proj;
-	// Create a Concave Hull representation of the projected inliers
-	PointCloud<PointXYZ>::Ptr cloud_hull(new PointCloud<PointXYZ>);
-	ConcaveHull<PointXYZ> chull;
-	//polygon
-
-	
-	// Optional
-	seg.setOptimizeCoefficients(true);
-	// Mandatory
-	seg.setModelType(SACMODEL_PLANE);
-	seg.setMethodType(SAC_RANSAC);
-	
-
-	
 	/*
 	*	VISUALIZATION
 	*/
@@ -232,74 +327,20 @@ int main(int argc, char* argv[])
 	viewer->initCameraParameters();
 	viewer->registerKeyboardCallback(keyboardEventOccurred, (void*)&viewer);
 
-	int v1(0);
-	int v2(0);
+	viewer->createViewPort(0.0, 0.0, 0.5, 1.0, viewPort1);
+	viewer->setBackgroundColor(0, 0, 0, viewPort1);
+	viewer->addText("colored", 10, 10, "v1 text", viewPort1);
 
-	viewer->createViewPort(0.0, 0.0, 0.5, 1.0, v1);
-	viewer->setBackgroundColor(0, 0, 0, v1);
-	viewer->addText("colored", 10, 10, "v1 text", v1);
+	viewer->createViewPort(0.5, 0.0, 1.0, 1.0, viewPort2);
+	viewer->setBackgroundColor(0.3, 0.3, 0.3, viewPort2);
+	viewer->addText("filtered", 10, 10, "v2 text", viewPort2);
 
-	viewer->createViewPort(0.5, 0.0, 1.0, 1.0, v2);
-	viewer->setBackgroundColor(0.3, 0.3, 0.3, v2);
-	viewer->addText("filtered", 10, 10, "v2 text", v2);
-
-	/*
-	* Segmentatiton
-	
-
-	int numOfPlanes = 2;
-	for (int i = 1; i <= numOfPlanes; i++)
-	{
-		seg.setDistanceThreshold(0.03); //0.01
-		seg.setInputCloud(cloud_filtered);
-		seg.segment(*inliers, *coefficients);
-
-		if (inliers->indices.size() == 0)
-		{
-			PCL_ERROR("Could not estimate a planar model for the given dataset.");
-			return (-1);
-		}
-
-
-		proj.setModelType(SACMODEL_PLANE);
-		proj.setIndices(inliers);
-		proj.setInputCloud(cloud_filtered);
-		proj.setModelCoefficients(coefficients);
-		proj.filter(*cloud_projected);
-		std::cerr << "PointCloud after projection has: "
-			<< cloud_projected->points.size() << " data points." << std::endl;
-
-
-		chull.setInputCloud(cloud_projected);
-		chull.setAlpha(4.0); //4 for wall
-		chull.reconstruct(*cloud_hull);
-
-		std::cerr << "Concave hull has: " << cloud_hull->points.size()
-			<< " data points." << std::endl;
-
-		if (i <= numOfPlanes) {
-			extract.setInputCloud(cloud_filtered);
-			extract.setIndices(inliers);
-			extract.setNegative(true);
-			extract.filter(*cloud_minus_plane);
-		}
-		cloud_filtered.swap(cloud_minus_plane);
-		boost::shared_ptr<PlanarPolygon<PointXYZ>> poly(new PlanarPolygon<PointXYZ>());
-		poly->setCoefficients(*coefficients);
-		poly->setContour(*cloud_hull);
-		double r = random01();
-		double g = random01();
-		double b = random01();
-		viewer->addPolygon(*poly, r, g, b, "stena" + i, v2);
-		
-	}
-	*/
 	visualization::PointCloudColorHandlerRGBField<PointXYZRGB> rgb(g_CloudRGB);
-	viewer->addPointCloud<PointXYZRGB>(g_CloudRGB, rgb, "colored_cloud", v1);
+	viewer->addPointCloud<PointXYZRGB>(g_CloudRGB, rgb, "colored_cloud", viewPort1);
 	//viewer->addPointCloud<PointXYZ>(cloud_projected, "ransac_cloud", 0);
 	viewer->setPointCloudRenderingProperties(visualization::PCL_VISUALIZER_POINT_SIZE, 2, "colored_cloud");
 
-	viewer->addPointCloud<PointXYZ>(cloud_filtered, "cloud_output", v2);
+	viewer->addPointCloud<PointXYZ>(g_Cloud_output, "cloud_output", viewPort2);
 	//viewer->addPlane(*coefficients, "prvni_rovina", 0);
 
 	

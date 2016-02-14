@@ -7,6 +7,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "3Dmodel", "3Dmodel\3Dmodel.
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "testMethods", "testMethods\testMethods.vcxproj", "{BAAA0DDE-2AF2-4183-80C2-E3EE3B498204}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Cloud Grabber", "Cloud Grabber\Cloud Grabber.vcxproj", "{3C741759-2914-434C-8DBE-29E2C6B19E50}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -31,6 +33,14 @@ Global
 		{BAAA0DDE-2AF2-4183-80C2-E3EE3B498204}.Release|x64.Build.0 = Release|x64
 		{BAAA0DDE-2AF2-4183-80C2-E3EE3B498204}.Release|x86.ActiveCfg = Release|Win32
 		{BAAA0DDE-2AF2-4183-80C2-E3EE3B498204}.Release|x86.Build.0 = Release|Win32
+		{3C741759-2914-434C-8DBE-29E2C6B19E50}.Debug|x64.ActiveCfg = Debug|x64
+		{3C741759-2914-434C-8DBE-29E2C6B19E50}.Debug|x64.Build.0 = Debug|x64
+		{3C741759-2914-434C-8DBE-29E2C6B19E50}.Debug|x86.ActiveCfg = Debug|Win32
+		{3C741759-2914-434C-8DBE-29E2C6B19E50}.Debug|x86.Build.0 = Debug|Win32
+		{3C741759-2914-434C-8DBE-29E2C6B19E50}.Release|x64.ActiveCfg = Release|x64
+		{3C741759-2914-434C-8DBE-29E2C6B19E50}.Release|x64.Build.0 = Release|x64
+		{3C741759-2914-434C-8DBE-29E2C6B19E50}.Release|x86.ActiveCfg = Release|Win32
+		{3C741759-2914-434C-8DBE-29E2C6B19E50}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
